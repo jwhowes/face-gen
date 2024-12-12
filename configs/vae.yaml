@@ -1,0 +1,12 @@
+log_interval: 10
+num_epochs: 3
+dataset:
+  batch_size: 16
+  image_size: [128, 96]
+model:
+  dims: [96, 192, 384]
+  depths: [1, 3, 2]
+discriminator:
+  patch_size: 32
+  dims: [48, 96]
+  depths: [2, 2]
