@@ -1,5 +1,5 @@
-log_interval: 10
+log_interval: 50
 num_epochs: 3
 dataset:
-  batch_size: 16
+  batch_size: 32
   image_size: [128, 96]
