@@ -1,5 +1,6 @@
-from .util import BaseConfig, SubConfig
 from typing import Optional, Dict
+
+from .util import BaseConfig, SubConfig
 
 
 class VAEModelConfig(SubConfig):

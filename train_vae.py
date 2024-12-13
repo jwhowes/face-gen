@@ -6,15 +6,15 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from transformers import get_cosine_schedule_with_warmup
 
-from src.model.ConvNeXt import VAEEncoder, VAEDecoder, Discriminator
+from src.model import VAEEncoder, VAEDecoder, Discriminator
 from src.data import FaceDataset
-from src.config.vae import VAEConfig
+from src.config import VAEConfig
 
 
 accelerator = Accelerator()
 
 
-def save_model(encoder, decoder, discriminator):
+def save_model(encoder, decoder, discriminator, config):
     save_model.num += 1
     torch.save(
         {
@@ -53,7 +53,6 @@ def train(
         num_training_steps=config.num_epochs * len(dataloader)
     )
 
-    accelerator = Accelerator()
     encoder, decoder, discriminator, dataloader, vae_opt, disc_opt, vae_lr_scheduler, disc_lr_scheduler = accelerator.prepare(
         encoder, decoder, discriminator, dataloader, vae_opt, disc_opt, vae_lr_scheduler, disc_lr_scheduler
     )
@@ -121,9 +120,9 @@ def train(
                       f"Adv Loss: {adv_loss.item():4f}")
 
             if i > 0 and i % config.save_interval == 0:
-                save_model(encoder, decoder, discriminator)
+                save_model(encoder, decoder, discriminator, config)
 
-        save_model(encoder, decoder, discriminator)
+        save_model(encoder, decoder, discriminator, config)
 
 
 if __name__ == "__main__":
