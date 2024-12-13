@@ -2,8 +2,9 @@ import torch
 
 from torch import nn
 from typing import Tuple
+from einops import rearrange
 
-from .ConvNeXt import Encoder
+from .ConvNeXt import Encoder, Block
 from .util import DiagonalGaussian
 
 

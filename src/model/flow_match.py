@@ -49,17 +49,7 @@ class FlowMatchSampler(nn.Module):
     def __init__(
             self, decoder: VAEDecoder, flow_match: FlowMatchModel,
             image_size: Tuple[int, int] = (160, 128),
-            latent_scale: float = 1.7232484817504883,
-            image_mean: Tuple[float, float, float] = (
-                    0.5043166875839233,
-                    0.4233281910419464,
-                    0.3812117874622345
-                ),
-            image_std: Tuple[float, float, float] = (
-                    0.30935946106910706,
-                    0.28855881094932556,
-                    0.28814613819122314
-                )
+            latent_scale: float = 1.7232484817504883
     ):
         super(FlowMatchSampler, self).__init__()
         self.decoder = decoder
@@ -72,15 +62,6 @@ class FlowMatchSampler(nn.Module):
 
         self.latent_scale = latent_scale
         self.image_size = image_size
-
-        self.register_buffer(
-            "image_mean",
-            torch.tensor(image_mean).view(1, -1, 1, 1)
-        )
-        self.register_buffer(
-            "image_std",
-            torch.tensor(image_std).view(1, -1, 1, 1)
-        )
 
     @torch.inference_mode()
     def forward(self, num_samples: int = 1, num_steps: int = 50, step: str = "euler"):
@@ -97,6 +78,4 @@ class FlowMatchSampler(nn.Module):
 
         image = self.decoder(z / self.latent_scale)
 
-        return (
-            image * self.image_std + self.image_mean
-        ).clamp(0.0, 1.0)
+        return ((image + 1) / 2).clamp(0.0, 1.0)

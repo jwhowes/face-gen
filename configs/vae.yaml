@@ -1,5 +1,6 @@
 log_interval: 10
 num_epochs: 3
+kl_weight: 0.05
 dataset:
   batch_size: 16
   image_size: [128, 96]
