@@ -67,12 +67,22 @@ class FlowMatchSampler(nn.Module):
     def forward(self, num_samples: int = 1, num_steps: int = 50, step: str = "euler"):
         z = torch.randn(num_samples, self.image_mean.shape[1], *self.image_size, device=self.image_mean.device)
         ts = torch.linspace(0, 1, num_steps, device=self.image_mean.device).expand(num_samples)
+        dt = 1 / num_steps
 
         for i in tqdm(range(num_steps)):
             pred_flow = self.flow_match.pred_flow(z, ts[i])
 
             if step == "euler":
-                z = z + (1 / num_steps) * pred_flow
+                z = z + dt * pred_flow
+            elif step == "midpoint":
+                z = z + dt * self.flow_match.pred_flow(
+                    z + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt
+                )
+            elif step == "stochastic":
+                z = z + (1 - self.flow_match.sigma_offset * ts[i]).view(-1, 1, 1, 1) * pred_flow
+                if i < num_steps - 1:
+                    next_t = ts[i + 1].view(-1, 1, 1)
+                    z = (1 - self.flow_match.sigma_offset * next_t) * torch.randn_like(z) + z * next_t
             else:
                 raise NotImplementedError
 
