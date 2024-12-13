@@ -7,7 +7,7 @@ from typing import Tuple, Union
 
 
 class FaceDataset(Dataset):
-    def __init__(self, image_size: Union[int, Tuple[int, int]] = (160, 128)):
+    def __init__(self, image_size: Tuple[int, int] = (160, 128)):
         self.ds = load_dataset("nielsr/CelebA-faces", split="train")
         self.transform = transforms.Compose([
             transforms.ToTensor(),
