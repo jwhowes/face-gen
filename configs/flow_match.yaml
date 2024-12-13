@@ -1,5 +1,8 @@
 log_interval: 50
 num_epochs: 3
+latent_model:
+  checkpoint: 1
+  latent_scale: 1.7588274662475532
 dataset:
   batch_size: 32
   image_size: [128, 96]
