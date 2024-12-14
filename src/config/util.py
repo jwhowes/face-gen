@@ -56,6 +56,7 @@ class BaseConfig(SubConfig):
         self.exp_name = os.path.splitext(os.path.basename(config_path))[0]
 
         super().__init__(config)
+        self.lr = float(self.lr)
 
     def save(self):
         if not os.path.isdir(f"experiments/{self.exp_name}"):
