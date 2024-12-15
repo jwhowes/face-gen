@@ -51,7 +51,7 @@ def train(
 
             with accelerator.autocast():
                 dist = encoder(image)
-                z = dist.sample() * config.latent_model.latent_scale
+                z = dist.mean * config.latent_model.latent_scale
 
                 loss = model(z)
 

@@ -2,9 +2,8 @@ import torch
 
 from torch import nn
 from typing import Optional, Tuple
-from einops import rearrange
 
-from .util import FiLM2d, DiagonalGaussian
+from .util import FiLM2d
 
 
 class Block(nn.Module):

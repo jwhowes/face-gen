@@ -19,6 +19,21 @@ class DiagonalGaussian:
         ).mean((1, 2, 3))
 
 
+class FiLM(nn.Module):
+    def __init__(self, d_model: int, d_t: int, *args, **kwargs):
+        super(FiLM, self).__init__()
+        self.norm = nn.LayerNorm(d_model, *args, elementwise_affine=False, **kwargs)
+
+        self.gamma = nn.Linear(d_t, d_model)
+        self.beta = nn.Linear(d_t, d_model)
+
+    def forward(self, x, t):
+        g = self.gamma(t).unsqueeze(1)
+        b = self.beta(t).unsqueeze(1)
+
+        return g * self.norm(x) + b
+
+
 class FiLM2d(nn.Module):
     def __init__(self, d_model: int, d_t: int, *args, **kwargs):
         super(FiLM2d, self).__init__()
