@@ -46,5 +46,5 @@ if __name__ == "__main__":
         )
     )
 
-    pred = sampler(num_steps=200, step="midpoint")
+    pred = sampler(num_steps=200, step="euler")
     plt.imsave("pred.png", pred[0].permute(1, 2, 0).numpy())
