@@ -3,15 +3,12 @@ import torch.nn.functional as F
 
 from argparse import ArgumentParser
 from torch.utils.data import DataLoader
-from accelerate import Accelerator
 from transformers import get_cosine_schedule_with_warmup
 
 from src.model import VAEEncoder, VAEDecoder, Discriminator
 from src.data import FaceDataset
 from src.config import VAEConfig
-
-
-accelerator = Accelerator()
+from src import accelerator
 
 
 def save_model(encoder, decoder, discriminator, config):

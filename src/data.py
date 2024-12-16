@@ -3,10 +3,13 @@ import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
 from torchvision import transforms
-from typing import Tuple, Union
+from typing import Tuple
+
+from . import accelerator
 
 
 class FaceDataset(Dataset):
+    @accelerator.main_process_first()
     def __init__(self, image_size: Tuple[int, int] = (160, 128)):
         self.ds = load_dataset("nielsr/CelebA-faces", split="train")
         self.transform = transforms.Compose([
