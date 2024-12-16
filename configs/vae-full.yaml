@@ -1,0 +1,8 @@
+log_interval: 10
+num_epochs: 1
+kl_weight: 0.05
+dataset:
+  batch_size: 32
+model:
+  dims: [96, 192, 384, 768]
+  depths: [1, 3, 3, 2]

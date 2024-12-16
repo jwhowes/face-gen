@@ -1,0 +1,10 @@
+log_interval: 50
+num_epochs: 1
+latent_model:
+  checkpoint: 4
+  latent_scale: 2.1042027473449707
+dataset:
+  batch_size: 32
+model:
+  dims: [128, 256, 512, 1024]
+  depths: [2, 2, 3, 2]
