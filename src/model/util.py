@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import torch.nn.functional as F
 
 from torch import nn
@@ -9,12 +10,22 @@ from ..data import FaceDataset
 
 
 class FlowModel(ABC, nn.Module):
-    def __init__(self, image_channels, sigma_min=1e-4, t_mult=100):
+    def __init__(self, image_channels, d_t=384, sigma_min=1e-4):
         super(FlowModel, self).__init__()
-        self.t_mult = t_mult
+        self._t_model = nn.Sequential(
+            SinusoidalPosEmb(d_t),
+            nn.Linear(d_t, 4 * d_t),
+            nn.GELU(),
+            nn.Linear(4 * d_t, d_t)
+        )
+
         self.image_channels = image_channels
         self.sigma_min = sigma_min
         self.sigma_offset = 1 - sigma_min
+
+        self.log_t_mult = nn.Parameter(
+            torch.tensor(np.log(1.0))
+        )
 
         self.register_buffer(
             "mean",
@@ -24,6 +35,9 @@ class FlowModel(ABC, nn.Module):
             "std",
             torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
         )
+
+    def t_model(self, t):
+        return self._t_model(t * self.log_t_mult.exp().clamp(max=1000.0))
 
     @abstractmethod
     def pred_flow(self, x_t, t):

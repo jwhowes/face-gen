@@ -52,17 +52,10 @@ class Block(nn.Module):
 class ViT(FlowModel):
     def __init__(
             self, image_channels, image_size, patch_size=8, d_model=768, d_t=384, n_layers=12, n_heads=12,
-            sigma_min=1e-4, t_mult=100
+            sigma_min=1e-4
     ):
-        super(ViT, self).__init__(image_channels, sigma_min, t_mult)
+        super(ViT, self).__init__(image_channels, d_t, sigma_min)
         assert image_size % patch_size == 0
-
-        self.t_model = nn.Sequential(
-            SinusoidalPosEmb(d_t),
-            nn.Linear(d_t, 4 * d_t),
-            nn.GELU(),
-            nn.Linear(4 * d_t, d_t)
-        )
 
         self.num_patches = image_size // patch_size
         self.patch_size = patch_size
