@@ -1,11 +1,8 @@
 import torch
-import torch.nn.functional as F
 
 from torch import nn
-from tqdm import tqdm
 
-from .util import FiLM2d, SinusoidalPosEmb, GRN
-from ..data import FaceDataset
+from .util import FiLM2d, SinusoidalPosEmb, GRN, FlowModel
 
 
 class Block(nn.Module):
@@ -30,14 +27,9 @@ class Block(nn.Module):
         ))
 
 
-class FlowModel(nn.Module):
+class UNet(FlowModel):
     def __init__(self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), sigma_min=1e-4):
-        super(FlowModel, self).__init__()
-        self.image_channels = image_channels
-
-        self.sigma_min = sigma_min
-        self.sigma_offset = 1 - sigma_min
-
+        super(UNet, self).__init__(image_channels, sigma_min)
         self.t_model = nn.Sequential(
             SinusoidalPosEmb(d_t),
             nn.Linear(d_t, 4 * d_t),
@@ -77,15 +69,6 @@ class FlowModel(nn.Module):
 
         self.head = nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
 
-        self.register_buffer(
-            "mean",
-            torch.tensor(FaceDataset.mean).view(1, -1, 1, 1)
-        )
-        self.register_buffer(
-            "std",
-            torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
-        )
-
     def pred_flow(self, x_t, t):
         t_emb = self.t_model(t)
 
@@ -111,45 +94,3 @@ class FlowModel(nn.Module):
                 x_t = block(x_t, t_emb)
 
         return self.head(x_t)
-
-    @torch.inference_mode()
-    def sample(self, num_samples=1, image_size=218, num_steps=200, step="euler"):
-        dt = 1 / num_steps
-
-        x_t = torch.randn(num_samples, self.image_channels, image_size, image_size)
-        ts = torch.linspace(1, 0, num_steps).unsqueeze(1).expand(-1, num_samples)
-
-        for i in tqdm(range(num_steps)):
-            pred_flow = self.pred_flow(x_t, ts[i])
-
-            if step == "euler":
-                x_t = x_t + dt * pred_flow
-            elif step == "midpoint":
-                x_t = x_t + dt * self.pred_flow(x_t + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt)
-            elif step == "heun":
-                next_x = x_t + dt * pred_flow
-                if i == num_steps - 1:
-                    x_t = next_x
-                else:
-                    x_t = x_t + dt * 0.5 * (pred_flow + self.pred_flow(next_x, ts[i + 1]))
-            elif step == "stochastic":
-                x_t = x_t + (1 - ts[i]).view(-1, 1, 1, 1) * pred_flow
-                if i < num_steps - 1:
-                    next_t = ts[i + 1].view(-1, 1, 1, 1)
-                    x_0 = torch.randn_like(x_t)
-                    x_t = (1 - self.sigma_offset * next_t) * x_0 + next_t * x_t
-            else:
-                raise NotImplementedError
-
-        return (x_t * self.std + self.mean).clamp(0.0, 1.0)
-
-    def forward(self, x_1):
-        B = x_1.shape[0]
-
-        t = torch.rand(B, device=x_1.device).view(B, 1, 1, 1)
-        x_0 = torch.randn_like(x_1)
-        x_t = (1 - self.sigma_offset * t) * x_0 + t * x_1
-
-        pred = self.pred_flow(x_t, t)
-
-        return F.mse_loss(pred, x_1 - self.sigma_offset * x_0)

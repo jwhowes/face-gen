@@ -1,6 +1,74 @@
 import torch
+import torch.nn.functional as F
 
 from torch import nn
+from abc import ABC, abstractmethod
+from tqdm import tqdm
+
+from ..data import FaceDataset
+
+
+class FlowModel(ABC, nn.Module):
+    def __init__(self, image_channels, sigma_min=1e-4):
+        super(FlowModel, self).__init__()
+        self.image_channels = image_channels
+        self.sigma_min = sigma_min
+        self.sigma_offset = 1 - sigma_min
+
+        self.register_buffer(
+            "mean",
+            torch.tensor(FaceDataset.mean).view(1, -1, 1, 1)
+        )
+        self.register_buffer(
+            "std",
+            torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
+        )
+
+    @abstractmethod
+    def pred_flow(self, x_t, t):
+        ...
+
+    @torch.inference_mode()
+    def sample(self, num_samples=1, image_size=218, num_steps=200, step="euler"):
+        dt = 1 / num_steps
+
+        x_t = torch.randn(num_samples, self.image_channels, image_size, image_size)
+        ts = torch.linspace(1, 0, num_steps).unsqueeze(1).expand(-1, num_samples)
+
+        for i in tqdm(range(num_steps)):
+            pred_flow = self.pred_flow(x_t, ts[i])
+
+            if step == "euler":
+                x_t = x_t + dt * pred_flow
+            elif step == "midpoint":
+                x_t = x_t + dt * self.pred_flow(x_t + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt)
+            elif step == "heun":
+                next_x = x_t + dt * pred_flow
+                if i == num_steps - 1:
+                    x_t = next_x
+                else:
+                    x_t = x_t + dt * 0.5 * (pred_flow + self.pred_flow(next_x, ts[i + 1]))
+            elif step == "stochastic":
+                x_t = x_t + (1 - ts[i]).view(-1, 1, 1, 1) * pred_flow
+                if i < num_steps - 1:
+                    next_t = ts[i + 1].view(-1, 1, 1, 1)
+                    x_0 = torch.randn_like(x_t)
+                    x_t = (1 - self.sigma_offset * next_t) * x_0 + next_t * x_t
+            else:
+                raise NotImplementedError
+
+        return (x_t * self.std + self.mean).clamp(0.0, 1.0)
+
+    def forward(self, x_1):
+        B = x_1.shape[0]
+
+        t = torch.rand(B, device=x_1.device).view(B, 1, 1, 1)
+        x_0 = torch.randn_like(x_1)
+        x_t = (1 - self.sigma_offset * t) * x_0 + t * x_1
+
+        pred = self.pred_flow(x_t, t)
+
+        return F.mse_loss(pred, x_1 - self.sigma_offset * x_0)
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -34,6 +102,39 @@ class FiLM2d(nn.Module):
         g = self.gamma(t).view(B, -1, 1, 1)
         b = self.beta(t).view(B, -1, 1, 1)
         return g * self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2) + b
+
+
+class RMSFiLM(nn.Module):
+    def __init__(self, d_model, d_t, eps=1e-6):
+        super(RMSFiLM, self).__init__()
+        self.eps = eps
+
+        self.gamma = nn.Linear(d_t, d_model)
+        self.beta = nn.Linear(d_t, d_model)
+
+    def forward(self, x, t):
+        B = x.shape[0]
+        g = self.gamma(t).view(B, -1, 1, 1)
+        b = self.beta(t).view(B, -1, 1, 1)
+
+        return g * x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) + b
+
+
+class SwiGLU(nn.Module):
+    def __init__(self, d_model, hidden_size=None):
+        super(SwiGLU, self).__init__()
+        if hidden_size is None:
+            hidden_size = 4 * d_model
+
+        self.gate = nn.Linear(d_model, hidden_size, bias=False)
+        self.hidden = nn.Linear(d_model, hidden_size, bias=False)
+
+        self.out = nn.Linear(hidden_size, d_model)
+
+    def forward(self, x):
+        return self.out(
+            F.silu(self.gate(x)) * self.hidden(x)
+        )
 
 
 class GRN(nn.Module):
