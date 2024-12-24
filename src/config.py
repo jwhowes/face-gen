@@ -18,11 +18,26 @@ class SubConfig:
 
 class ModelConfig(SubConfig):
     def __init__(self, config: Optional[Dict] = None):
+        self.d_t: int = 384
+        self.sigma_min: float = 1e-4
+
+        super().__init__(config)
+
+
+class UNetConfig(ModelConfig):
+    def __init__(self, config: Optional[Dict] = None):
         self.dims: Tuple[int] = (96, 192, 384, 768)
         self.depths: Tuple[int] = (2, 2, 5, 3)
-        self.d_t: int = 384
 
-        self.sigma_min: float = 1e-4
+        super().__init__(config)
+
+
+class ViTConfig(ModelConfig):
+    def __init__(self, config: Optional[Dict] = None):
+        self.patch_size: int = 8
+        self.d_model: int = 768
+        self.n_layers: int = 12
+        self.n_heads: int = 12
 
         super().__init__(config)
 
@@ -60,6 +75,8 @@ class Config(SubConfig):
         self.warmup: float = 0.2
         self.clip_grad: Optional[float] = None
 
+        self.arch = "unet"
+
         with open(config_path) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -67,11 +84,17 @@ class Config(SubConfig):
         self.lr = float(self.lr)
 
         if config is not None:
-            self.model = ModelConfig(config["model"] if "model" in config else None)
-            self.dataset = DatasetConfig(config["dataset"] if "dataset" in config else None)
+            if self.arch == "unet":
+                self.model: UNetConfig = UNetConfig(config["model"] if "model" in config else None)
+            else:
+                self.model: ViTConfig = ViTConfig(config["model"] if "model" in config else None)
+            self.dataset: DatasetConfig = DatasetConfig(config["dataset"] if "dataset" in config else None)
         else:
-            self.model = ModelConfig()
-            self.dataset = DatasetConfig()
+            if self.arch == "unet":
+                self.model: UNetConfig = UNetConfig()
+            else:
+                self.model: ViTConfig = ViTConfig()
+            self.dataset: DatasetConfig = DatasetConfig()
 
         self.exp_name = os.path.splitext(os.path.basename(config_path))[0]
         self.exp_dir = os.path.join("experiments", self.exp_name)
