@@ -50,9 +50,11 @@ class Block(nn.Module):
 
 
 class ViT(FlowModel):
-    def __init__(self, image_channels, image_size, patch_size=8, d_model=768, d_t=384, n_layers=12, n_heads=12,
-                 sigma_min=1e-4):
-        super(ViT, self).__init__(image_channels, sigma_min)
+    def __init__(
+            self, image_channels, image_size, patch_size=8, d_model=768, d_t=384, n_layers=12, n_heads=12,
+            sigma_min=1e-4, t_mult=100
+    ):
+        super(ViT, self).__init__(image_channels, sigma_min, t_mult)
         assert image_size % patch_size == 0
 
         self.t_model = nn.Sequential(
@@ -77,7 +79,7 @@ class ViT(FlowModel):
         self.head = nn.Linear(d_model, image_channels * patch_size * patch_size)
 
     def pred_flow(self, x_t, t):
-        t_emb = self.t_model(t)
+        t_emb = self.t_model(t * self.t_mult)
 
         x_t = self.stem(rearrange(
             x_t, "b c (h hp) (w wp) -> b (h w) (c hp wp)",

@@ -28,8 +28,10 @@ class Block(nn.Module):
 
 
 class UNet(FlowModel):
-    def __init__(self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), sigma_min=1e-4):
-        super(UNet, self).__init__(image_channels, sigma_min)
+    def __init__(
+            self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), sigma_min=1e-4, t_mult=100
+    ):
+        super(UNet, self).__init__(image_channels, sigma_min, t_mult)
         self.t_model = nn.Sequential(
             SinusoidalPosEmb(d_t),
             nn.Linear(d_t, 4 * d_t),
@@ -70,7 +72,7 @@ class UNet(FlowModel):
         self.head = nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
 
     def pred_flow(self, x_t, t):
-        t_emb = self.t_model(t)
+        t_emb = self.t_model(t * self.t_mult)
 
         x_t = self.stem(x_t)
 

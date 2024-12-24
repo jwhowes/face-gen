@@ -20,6 +20,7 @@ class ModelConfig(SubConfig):
     def __init__(self, config: Optional[Dict] = None):
         self.d_t: int = 384
         self.sigma_min: float = 1e-4
+        self.t_mult: float = 100.0
 
         super().__init__(config)
 

@@ -9,8 +9,9 @@ from ..data import FaceDataset
 
 
 class FlowModel(ABC, nn.Module):
-    def __init__(self, image_channels, sigma_min=1e-4):
+    def __init__(self, image_channels, sigma_min=1e-4, t_mult=100):
         super(FlowModel, self).__init__()
+        self.t_mult = t_mult
         self.image_channels = image_channels
         self.sigma_min = sigma_min
         self.sigma_offset = 1 - sigma_min
@@ -29,11 +30,11 @@ class FlowModel(ABC, nn.Module):
         ...
 
     @torch.inference_mode()
-    def sample(self, num_samples=1, image_size=218, num_steps=200, step="euler"):
+    def sample(self, num_samples=1, image_size=192, num_steps=200, step="euler"):
         dt = 1 / num_steps
 
         x_t = torch.randn(num_samples, self.image_channels, image_size, image_size)
-        ts = torch.linspace(1, 0, num_steps).unsqueeze(1).expand(-1, num_samples)
+        ts = torch.linspace(0, 1, num_steps).unsqueeze(1).expand(-1, num_samples)
 
         for i in tqdm(range(num_steps)):
             pred_flow = self.pred_flow(x_t, ts[i])
