@@ -72,7 +72,7 @@ class ViT(FlowModel):
         self.head = nn.Linear(d_model, image_channels * patch_size * patch_size)
 
     def pred_flow(self, x_t, t):
-        t_emb = self.t_model(t * self.t_mult)
+        t_emb = self.t_model(t)
 
         x_t = self.stem(rearrange(
             x_t, "b c (h hp) (w wp) -> b (h w) (c hp wp)",

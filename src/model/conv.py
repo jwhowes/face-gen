@@ -65,7 +65,7 @@ class UNet(FlowModel):
         self.head = nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
 
     def pred_flow(self, x_t, t):
-        t_emb = self.t_model(t * self.t_mult)
+        t_emb = self.t_model(t)
 
         x_t = self.stem(x_t)
 
