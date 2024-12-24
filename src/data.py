@@ -2,6 +2,8 @@ from torch.utils.data import Dataset
 from datasets import load_dataset
 from torchvision import transforms
 
+from . import accelerator
+
 
 class FaceDataset(Dataset):
     mean = (
@@ -15,6 +17,7 @@ class FaceDataset(Dataset):
         0.300066202878952
     )
 
+    @accelerator.main_process_first()
     def __init__(self, image_size=192):
         assert image_size <= 218
 

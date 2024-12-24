@@ -20,7 +20,7 @@ class Block(nn.Module):
         self.ffn = nn.Sequential(
             nn.Conv2d(d_model, hidden_size, kernel_size=1),
             nn.GELU(),
-            GRN(d_model, eps=norm_eps),
+            GRN(4 * d_model, eps=norm_eps),
             nn.Conv2d(hidden_size, d_model, kernel_size=1)
         )
 
