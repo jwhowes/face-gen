@@ -77,6 +77,15 @@ class FlowModel(nn.Module):
 
         self.head = nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
 
+        self.register_buffer(
+            "mean",
+            torch.tensor(FaceDataset.mean).view(1, -1, 1, 1)
+        )
+        self.register_buffer(
+            "std",
+            torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
+        )
+
     def pred_flow(self, x_t, t):
         t_emb = self.t_model(t)
 
@@ -132,7 +141,7 @@ class FlowModel(nn.Module):
             else:
                 raise NotImplementedError
 
-        return (x_t * FaceDataset.std + FaceDataset.mean).clamp(0.0, 1.0)
+        return (x_t * self.std + self.mean).clamp(0.0, 1.0)
 
     def forward(self, x_1):
         B = x_1.shape[0]
