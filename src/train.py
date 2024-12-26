@@ -57,6 +57,8 @@ def train(
                 total_metrics[j] += m
 
             if accelerator.is_main_process and i % config.log_interval == 0:
-                print(f"{i} / {len(dataloader)} iters.\t{"\t".join([f'{k}: {v:.4f}' for k, v in zip(config.metrics, loss['metrics'])])}")
+                print(f"{i} / {len(dataloader)} iters.\t{'\t'.join(
+                    [f'{k}: {v:.4f}' for k, v in zip(config.metrics, loss['metrics'])]
+                )}")
 
         config.log(model, *[m / len(dataloader) for m in total_metrics])
