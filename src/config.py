@@ -24,6 +24,7 @@ class VAEConfig(SubConfig):
         self.kl_weight = 1e-4
 
         super().__init__(config)
+        self.kl_weight = float(self.kl_weight)
 
 
 class FlowMatchConfig(SubConfig):
