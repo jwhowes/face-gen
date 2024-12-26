@@ -2,9 +2,9 @@ import torch
 
 from torch.utils.data import DataLoader
 from transformers import get_cosine_schedule_with_warmup
+from torch import nn
 
 from . import accelerator
-from .model import FlowModel
 from .config import Config
 from .data import FaceDataset
 
