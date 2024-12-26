@@ -99,7 +99,11 @@ class FlowModel(ABC, nn.Module):
 
         pred = self.pred_flow(x_t, t)
 
-        return F.mse_loss(pred, x_1 - self.sigma_offset * x_0)
+        loss = F.mse_loss(pred, x_1 - self.sigma_offset * x_0)
+        return {
+            "loss": loss,
+            "metrics": (loss.item(),)
+        }
 
 
 class SinusoidalPosEmb(nn.Module):

@@ -6,13 +6,21 @@ from transformers import get_cosine_schedule_with_warmup
 from . import accelerator
 from .model import FlowModel
 from .config import Config
+from .data import FaceDataset
 
 
 def train(
         model: FlowModel,
-        dataloader: DataLoader,
         config: Config
 ):
+    dataset = FaceDataset(image_size=config.dataset.image_size)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config.dataset.batch_size,
+        shuffle=True,
+        pin_memory=True
+    )
+
     opt = torch.optim.Adam(
         model.parameters(), lr=config.lr
     )
@@ -31,23 +39,25 @@ def train(
         if accelerator.is_main_process:
             print(f"EPOCH {epoch + 1} / {config.num_epochs}")
 
-        total_loss = 0
+        total_metrics = [0 for _ in range(len(config.metrics))]
         for i, image in enumerate(dataloader):
             opt.zero_grad()
 
             with accelerator.autocast():
                 loss = model(image)
 
-            accelerator.backward(loss)
+            accelerator.backward(loss["loss"])
             if config.clip_grad:
                 accelerator.clip_grad_norm_(model.parameters(), config.clip_grad)
 
             opt.step()
             lr_scheduler.step()
 
-            total_loss += loss.item()
+            for j, m in enumerate(loss["metrics"]):
+                total_metrics[j] += m
 
             if accelerator.is_main_process and i % config.log_interval == 0:
-                print(f"{i} / {len(dataloader)} iters.\tLoss: {loss.item():.6f}")
+                print(f"{i} / {len(dataloader)} iters.\t{"\t".join([f'{k}: {v:.4f}'
+                                                                    for k, v in zip(config.metrics, loss['metrics'])])}")
 
-        config.log(model, total_loss / len(dataloader))
+        config.log(model, *[m / len(dataloader) for m in total_metrics])

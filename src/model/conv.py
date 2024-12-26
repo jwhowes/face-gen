@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 from torch import nn
 
@@ -164,3 +165,28 @@ class VAEDecoder(nn.Module):
 
     def forward(self, z):
         return self.module(z)
+
+
+class VAE(nn.Module):
+    def __init__(self, image_channels, d_latent=4, dims=(96, 192, 384), depths=(2, 2, 5), kl_weight=1e-4):
+        super(VAE, self).__init__()
+        self.kl_weight = kl_weight
+
+        self.encoder = VAEEncoder(image_channels, d_latent, dims, depths)
+        self.decoder = VAEDecoder(image_channels, d_latent, dims, depths)
+
+    def forward(self, x):
+        dist = self.encoder(x)
+        kl_loss = dist.kl.mean()
+
+        z = dist.sample()
+        pred = self.decoder(z)
+        recon_loss = F.mse_loss(pred, x)
+
+        return {
+            "loss": recon_loss + self.kl_weight * kl_loss,
+            "metrics": (
+                recon_loss.item(),
+                kl_loss.item()
+            )
+        }

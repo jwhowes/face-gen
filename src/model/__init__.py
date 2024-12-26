@@ -1,3 +1,2 @@
-from .conv import UNet
-from .transformer import ViT
+from .conv import UNet, VAE
 from .util import FlowModel
