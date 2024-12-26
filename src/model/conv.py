@@ -2,12 +2,31 @@ import torch
 
 from torch import nn
 
-from .util import FiLM2d, SinusoidalPosEmb, GRN, FlowModel
+from .util import FiLM2d, LayerNorm2d, GRN, FlowModel, DiagonalGaussian
 
 
 class Block(nn.Module):
-    def __init__(self, d_model, d_t, hidden_size=None, norm_eps=1e-6):
+    def __init__(self, d_model, hidden_size=None, norm_eps=1e-6):
         super(Block, self).__init__()
+        if hidden_size is None:
+            hidden_size = 4 * d_model
+
+        self.module = nn.Sequential(
+            nn.Conv2d(d_model, d_model, kernel_size=7, padding=3, groups=d_model),
+            LayerNorm2d(d_model, eps=norm_eps),
+            nn.Conv2d(d_model, hidden_size, kernel_size=1),
+            nn.GELU(),
+            GRN(hidden_size, eps=norm_eps),
+            nn.Conv2d(hidden_size, d_model, kernel_size=1)
+        )
+
+    def forward(self, x):
+        return x + self.module(x)
+
+
+class FiLMBlock(nn.Module):
+    def __init__(self, d_model, d_t, hidden_size=None, norm_eps=1e-6):
+        super(FiLMBlock, self).__init__()
         if hidden_size is None:
             hidden_size = 4 * d_model
 
@@ -17,7 +36,7 @@ class Block(nn.Module):
         self.ffn = nn.Sequential(
             nn.Conv2d(d_model, hidden_size, kernel_size=1),
             nn.GELU(),
-            GRN(4 * d_model, eps=norm_eps),
+            GRN(hidden_size, eps=norm_eps),
             nn.Conv2d(hidden_size, d_model, kernel_size=1)
         )
 
@@ -38,14 +57,14 @@ class UNet(FlowModel):
         self.down_samples = nn.ModuleList()
         for i in range(len(dims) - 1):
             self.down_path.append(nn.ModuleList([
-                Block(dims[i], d_t) for _ in range(depths[i])
+                FiLMBlock(dims[i], d_t) for _ in range(depths[i])
             ]))
             self.down_samples.append(nn.Conv2d(
                 dims[i], dims[i + 1], kernel_size=4, stride=2, padding=1
             ))
 
         self.mid_blocks = nn.ModuleList([
-            Block(dims[-1], d_t) for _ in range(depths[-1])
+            FiLMBlock(dims[-1], d_t) for _ in range(depths[-1])
         ])
 
         self.up_path = nn.ModuleList()
@@ -59,7 +78,7 @@ class UNet(FlowModel):
                 2 * dims[i], dims[i], kernel_size=3, padding=1
             ))
             self.up_path.append(nn.ModuleList([
-                Block(dims[i], d_t) for _ in range(depths[i])
+                FiLMBlock(dims[i], d_t) for _ in range(depths[i])
             ]))
 
         self.head = nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
@@ -89,3 +108,59 @@ class UNet(FlowModel):
                 x_t = block(x_t, t_emb)
 
         return self.head(x_t)
+
+
+class VAEEncoder(nn.Module):
+    def __init__(self, image_channels, d_latent=4, dims=(96, 192, 384), depths=(2, 2, 5)):
+        super(VAEEncoder, self).__init__()
+
+        layers = [nn.Conv2d(image_channels, dims[0], kernel_size=5, padding=2)]
+
+        for i in range(len(dims) - 1):
+            layers += [
+                Block(dims[i]) for _ in range(depths[i])
+            ]
+            layers += [
+                nn.Conv2d(dims[i], dims[i + 1], kernel_size=4, stride=2, padding=1)
+            ]
+
+        layers += [
+            Block(dims[-1]) for _ in range(depths[-1])
+        ]
+        layers += [
+            nn.Conv2d(dims[-1], 2 * d_latent, kernel_size=5, padding=2)
+        ]
+
+        self.module = nn.Sequential(*layers)
+
+    def forward(self, x):
+        mean, log_var = self.module(x).chunk(2, 1)
+
+        return DiagonalGaussian(mean=mean, log_var=log_var)
+
+
+class VAEDecoder(nn.Module):
+    def __init__(self, image_channels, d_latent=4, dims=(96, 192, 384), depths=(2, 2, 5)):
+        super(VAEDecoder, self).__init__()
+        layers = [nn.Conv2d(d_latent, dims[-1], kernel_size=5, padding=2)]
+
+        layers += [
+            Block(dims[-1]) for _ in range(depths[-1])
+        ]
+
+        for i in range(len(dims) - 2, -1, -1):
+            layers += [
+                nn.ConvTranspose2d(dims[i + 1], dims[i], kernel_size=4, stride=2, padding=1)
+            ]
+            layers += [
+                Block(dims[i]) for _ in range(depths[i])
+            ]
+
+        layers += [
+            nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
+        ]
+
+        self.module = nn.Sequential(*layers)
+
+    def forward(self, z):
+        return self.module(z)

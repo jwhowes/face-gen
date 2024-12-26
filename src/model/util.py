@@ -5,8 +5,24 @@ import torch.nn.functional as F
 from torch import nn
 from abc import ABC, abstractmethod
 from tqdm import tqdm
+from dataclasses import dataclass
 
 from ..data import FaceDataset
+
+
+@dataclass
+class DiagonalGaussian:
+    mean: torch.FloatTensor
+    log_var: torch.FloatTensor
+
+    def sample(self):
+        return torch.randn_like(self.log_var) * (0.5 * self.log_var).exp() + self.mean
+
+    @property
+    def kl(self):
+        return 0.5 * (
+            self.mean.pow(2) + self.log_var.exp() - 1.0 - self.log_var
+        ).flatten(1).mean(-1)
 
 
 class FlowModel(ABC, nn.Module):
@@ -103,6 +119,11 @@ class SinusoidalPosEmb(nn.Module):
             x.cos(),
             x.sin()
         ), dim=1).flatten(-2)
+
+
+class LayerNorm2d(nn.LayerNorm):
+    def forward(self, x):
+        return super().forward(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
 
 class FiLM2d(nn.Module):
