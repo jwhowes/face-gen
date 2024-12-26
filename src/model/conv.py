@@ -1,9 +1,14 @@
 import torch
+import numpy as np
 import torch.nn.functional as F
 
 from torch import nn
+from tqdm import tqdm
 
-from .util import FiLM2d, LayerNorm2d, GRN, FlowModel, DiagonalGaussian
+from .util import FiLM2d, LayerNorm2d, GRN, DiagonalGaussian, SinusoidalPosEmb
+
+from ..config import Config, VAEConfig
+from ..data import FaceDataset
 
 
 class Block(nn.Module):
@@ -47,12 +52,33 @@ class FiLMBlock(nn.Module):
         ))
 
 
-class UNet(FlowModel):
+class UNet(nn.Module):
     def __init__(
-            self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), sigma_min=1e-4
+            self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), vae_exp="vae", vae_epoch=1,
+            sigma_min=1e-4
     ):
-        super(UNet, self).__init__(image_channels, d_t, sigma_min)
-        self.stem = nn.Conv2d(image_channels, dims[0], kernel_size=5, padding=2)
+        super(UNet, self).__init__()
+        vae_config = Config(f"experiments/{vae_exp}/config.yaml", VAEConfig).model
+
+        self.latent_factor = 2 ** (len(vae_config.dims) - 1)
+        self.register_buffer(
+            "latent_scale",
+            nn.UninitializedBuffer()
+        )
+        self.vae = VAE(
+            image_channels=image_channels,
+            d_latent=vae_config.d_latent,
+            dims=vae_config.dims,
+            depths=vae_config.depths
+        )
+        ckpt = torch.load(
+            f"experiments/{vae_exp}/checkpoint_{vae_epoch:02}.pt", weights_only=True, map_location="cpu"
+        )
+        self.vae.load_state_dict(ckpt)
+        self.vae.eval()
+        self.vae.requires_grad_(False)
+
+        self.stem = nn.Conv2d(vae_config.d_latent, dims[0], kernel_size=5, padding=2)
 
         self.down_path = nn.ModuleList()
         self.down_samples = nn.ModuleList()
@@ -82,33 +108,115 @@ class UNet(FlowModel):
                 FiLMBlock(dims[i], d_t) for _ in range(depths[i])
             ]))
 
-        self.head = nn.Conv2d(dims[0], image_channels, kernel_size=5, padding=2)
+        self.head = nn.Conv2d(dims[0], vae_config.d_latent, kernel_size=5, padding=2)
 
-    def pred_flow(self, x_t, t):
+        self._t_model = nn.Sequential(
+            SinusoidalPosEmb(d_t),
+            nn.Linear(d_t, 4 * d_t),
+            nn.GELU(),
+            nn.Linear(4 * d_t, d_t)
+        )
+
+        self.image_channels = image_channels
+        self.sigma_min = sigma_min
+        self.sigma_offset = 1 - sigma_min
+
+        self.log_t_mult = nn.Parameter(
+            torch.tensor(np.log(1.0))
+        )
+
+        self.register_buffer(
+            "mean",
+            torch.tensor(FaceDataset.mean).view(1, -1, 1, 1)
+        )
+        self.register_buffer(
+            "std",
+            torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
+        )
+
+    def pred_flow(self, z_t, t):
         t_emb = self.t_model(t)
 
-        x_t = self.stem(x_t)
+        z_t = self.stem(z_t)
 
         acts = []
         for blocks, sample in zip(self.down_path, self.down_samples):
             for block in blocks:
-                x_t = block(x_t, t_emb)
-            acts.append(x_t)
-            x_t = sample(x_t)
+                z_t = block(z_t, t_emb)
+            acts.append(z_t)
+            z_t = sample(z_t)
 
         for block in self.mid_blocks:
-            x_t = block(x_t, t_emb)
+            z_t = block(z_t, t_emb)
 
         for blocks, sample, combine, act in zip(self.up_path, self.up_samples, self.up_combines, acts[::-1]):
-            x_t = combine(torch.concatenate((
-                sample(x_t),
+            z_t = combine(torch.concatenate((
+                sample(z_t),
                 act
             ), dim=1))
 
             for block in blocks:
-                x_t = block(x_t, t_emb)
+                z_t = block(z_t, t_emb)
 
-        return self.head(x_t)
+        return self.head(z_t)
+
+    def t_model(self, t):
+        return self._t_model(t * self.log_t_mult.exp().clamp(max=1000.0))
+
+    @torch.inference_mode()
+    def sample(self, num_samples=1, image_size=192, num_steps=200, step="euler"):
+        dt = 1 / num_steps
+
+        z_t = torch.randn(
+            num_samples, self.image_channels, image_size // self.latent_factor, image_size // self.latent_factor
+        )
+        ts = torch.linspace(0, 1, num_steps).unsqueeze(1).expand(-1, num_samples)
+
+        for i in tqdm(range(num_steps)):
+            pred_flow = self.pred_flow(z_t, ts[i])
+
+            if step == "euler":
+                z_t = z_t + dt * pred_flow
+            elif step == "midpoint":
+                z_t = z_t + dt * self.pred_flow(z_t + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt)
+            elif step == "heun":
+                next_x = z_t + dt * pred_flow
+                if i == num_steps - 1:
+                    z_t = next_x
+                else:
+                    z_t = z_t + dt * 0.5 * (pred_flow + self.pred_flow(next_x, ts[i + 1]))
+            elif step == "stochastic":
+                z_t = z_t + (1 - ts[i]).view(-1, 1, 1, 1) * pred_flow
+                if i < num_steps - 1:
+                    next_t = ts[i + 1].view(-1, 1, 1, 1)
+                    z_0 = torch.randn_like(z_t)
+                    z_t = (1 - self.sigma_offset * next_t) * z_0 + next_t * z_t
+            else:
+                raise NotImplementedError
+
+        x = self.vae.decoder(z_t / self.latent_scale)
+        return (x * self.std + self.mean).clamp(0.0, 1.0)
+
+    def forward(self, x):
+        B = x.shape[0]
+
+        z_1 = self.vae.encoder(x).sample()
+        if isinstance(self.latent_scale, nn.UninitializedBuffer):
+            self.latent_scale = 1.0 / z_1.flatten().std()
+
+        z_1 = z_1 * self.latent_scale
+
+        t = torch.rand(B, device=z_1.device).view(B, 1, 1, 1)
+        z_0 = torch.randn_like(z_1)
+        z_t = (1 - self.sigma_offset * t) * z_0 + t * z_1
+
+        pred = self.pred_flow(z_t, t)
+
+        loss = F.mse_loss(pred, z_1 - self.sigma_offset * z_0)
+        return {
+            "loss": loss,
+            "metrics": (loss.item(),)
+        }
 
 
 class VAEEncoder(nn.Module):
