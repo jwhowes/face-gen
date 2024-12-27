@@ -58,7 +58,7 @@ class UNet(nn.Module):
             sigma_min=1e-4
     ):
         super(UNet, self).__init__()
-        vae_config = Config(f"experiments/{vae_exp}/config.yaml", VAEConfig).model
+        vae_config = Config(f"experiments/{vae_exp}/config.yaml", model_class=VAEConfig).model
 
         self.latent_factor = 2 ** (len(vae_config.dims) - 1)
         self.register_buffer(

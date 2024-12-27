@@ -1,13 +1,8 @@
 import torch
-import numpy as np
 import torch.nn.functional as F
 
 from torch import nn
-from abc import ABC, abstractmethod
-from tqdm import tqdm
 from dataclasses import dataclass
-
-from ..data import FaceDataset
 
 
 @dataclass
