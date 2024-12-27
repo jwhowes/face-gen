@@ -62,9 +62,11 @@ class UNet(nn.Module):
 
         self.latent_factor = 2 ** (len(vae_config.dims) - 1)
         self.register_buffer(
-            "latent_scale",
-            nn.UninitializedBuffer()
+            "scale_factor",
+            torch.tensor(1.0)
         )
+        self.scale_factor_set = False
+
         self.vae = VAE(
             image_channels=image_channels,
             d_latent=vae_config.d_latent,
@@ -118,6 +120,7 @@ class UNet(nn.Module):
         )
 
         self.image_channels = image_channels
+        self.d_latent = vae_config.d_latent
         self.sigma_min = sigma_min
         self.sigma_offset = 1 - sigma_min
 
@@ -168,7 +171,7 @@ class UNet(nn.Module):
         dt = 1 / num_steps
 
         z_t = torch.randn(
-            num_samples, self.image_channels, image_size // self.latent_factor, image_size // self.latent_factor
+            num_samples, self.d_latent, image_size // self.latent_factor, image_size // self.latent_factor
         )
         ts = torch.linspace(0, 1, num_steps).unsqueeze(1).expand(-1, num_samples)
 
@@ -194,15 +197,19 @@ class UNet(nn.Module):
             else:
                 raise NotImplementedError
 
-        x = self.vae.decoder(z_t / self.latent_scale)
+        x = self.vae.decoder(z_t / self.scale_factor)
         return (x * self.std + self.mean).clamp(0.0, 1.0)
 
     def forward(self, x):
         B = x.shape[0]
 
         z_1 = self.vae.encoder(x).sample()
-        if isinstance(self.latent_scale, nn.UninitializedBuffer):
-            self.latent_scale = 1.0 / z_1.flatten().std()
+        if not self.scale_factor_set:
+            del self.scale_factor
+            self.register_buffer(
+                "scale_factor",
+                1.0 / z_1.flatten().std()
+            )
 
         z_1 = z_1 * self.latent_scale
 
