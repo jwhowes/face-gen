@@ -52,12 +52,12 @@ class FiLMBlock(nn.Module):
         ))
 
 
-class UNet(nn.Module):
+class FlowModel(nn.Module):
     def __init__(
             self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), vae_exp="vae", vae_epoch=1,
             sigma_min=1e-4
     ):
-        super(UNet, self).__init__()
+        super(FlowModel, self).__init__()
         vae_config = Config(f"experiments/{vae_exp}/config.yaml", model_class=VAEConfig).model
 
         self.latent_factor = 2 ** (len(vae_config.dims) - 1)
@@ -132,6 +132,10 @@ class UNet(nn.Module):
             "std",
             torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
         )
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.vae.eval()
 
     def pred_flow(self, z_t, t):
         t_emb = self.t_model(t)

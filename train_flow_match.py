@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 
 from src.config import Config
-from src.model import UNet
+from src.model import FlowModel
 from src.train import train
 
 
@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     config = Config(args.config, save=True)
 
-    model = UNet(
+    model = FlowModel(
         image_channels=3,
         d_t=config.model.d_t,
         dims=config.model.dims,

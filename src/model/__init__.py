@@ -1,1 +1,1 @@
-from .conv import UNet, VAE
+from .conv import FlowModel, VAE
