@@ -1,89 +1,23 @@
 import torch
-import numpy as np
 import torch.nn.functional as F
 
 from torch import nn
-from abc import ABC, abstractmethod
-from tqdm import tqdm
-
-from ..data import FaceDataset
+from dataclasses import dataclass
 
 
-class FlowModel(ABC, nn.Module):
-    def __init__(self, image_channels, d_t=384, sigma_min=1e-4):
-        super(FlowModel, self).__init__()
-        self._t_model = nn.Sequential(
-            SinusoidalPosEmb(d_t),
-            nn.Linear(d_t, 4 * d_t),
-            nn.GELU(),
-            nn.Linear(4 * d_t, d_t)
-        )
+@dataclass
+class DiagonalGaussian:
+    mean: torch.FloatTensor
+    log_var: torch.FloatTensor
 
-        self.image_channels = image_channels
-        self.sigma_min = sigma_min
-        self.sigma_offset = 1 - sigma_min
+    def sample(self):
+        return torch.randn_like(self.log_var) * (0.5 * self.log_var).exp() + self.mean
 
-        self.log_t_mult = nn.Parameter(
-            torch.tensor(np.log(1.0))
-        )
-
-        self.register_buffer(
-            "mean",
-            torch.tensor(FaceDataset.mean).view(1, -1, 1, 1)
-        )
-        self.register_buffer(
-            "std",
-            torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
-        )
-
-    def t_model(self, t):
-        return self._t_model(t * self.log_t_mult.exp().clamp(max=1000.0))
-
-    @abstractmethod
-    def pred_flow(self, x_t, t):
-        ...
-
-    @torch.inference_mode()
-    def sample(self, num_samples=1, image_size=192, num_steps=200, step="euler"):
-        dt = 1 / num_steps
-
-        x_t = torch.randn(num_samples, self.image_channels, image_size, image_size)
-        ts = torch.linspace(0, 1, num_steps).unsqueeze(1).expand(-1, num_samples)
-
-        for i in tqdm(range(num_steps)):
-            pred_flow = self.pred_flow(x_t, ts[i])
-
-            if step == "euler":
-                x_t = x_t + dt * pred_flow
-            elif step == "midpoint":
-                x_t = x_t + dt * self.pred_flow(x_t + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt)
-            elif step == "heun":
-                next_x = x_t + dt * pred_flow
-                if i == num_steps - 1:
-                    x_t = next_x
-                else:
-                    x_t = x_t + dt * 0.5 * (pred_flow + self.pred_flow(next_x, ts[i + 1]))
-            elif step == "stochastic":
-                x_t = x_t + (1 - ts[i]).view(-1, 1, 1, 1) * pred_flow
-                if i < num_steps - 1:
-                    next_t = ts[i + 1].view(-1, 1, 1, 1)
-                    x_0 = torch.randn_like(x_t)
-                    x_t = (1 - self.sigma_offset * next_t) * x_0 + next_t * x_t
-            else:
-                raise NotImplementedError
-
-        return (x_t * self.std + self.mean).clamp(0.0, 1.0)
-
-    def forward(self, x_1):
-        B = x_1.shape[0]
-
-        t = torch.rand(B, device=x_1.device).view(B, 1, 1, 1)
-        x_0 = torch.randn_like(x_1)
-        x_t = (1 - self.sigma_offset * t) * x_0 + t * x_1
-
-        pred = self.pred_flow(x_t, t)
-
-        return F.mse_loss(pred, x_1 - self.sigma_offset * x_0)
+    @property
+    def kl(self):
+        return 0.5 * (
+            self.mean.pow(2) + self.log_var.exp() - 1.0 - self.log_var
+        ).flatten(1).mean(-1)
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -103,6 +37,11 @@ class SinusoidalPosEmb(nn.Module):
             x.cos(),
             x.sin()
         ), dim=1).flatten(-2)
+
+
+class LayerNorm2d(nn.LayerNorm):
+    def forward(self, x):
+        return super().forward(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
 
 class FiLM2d(nn.Module):

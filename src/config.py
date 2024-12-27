@@ -2,7 +2,7 @@ import yaml
 import os
 import torch
 
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Type
 from datetime import datetime
 
 from . import accelerator
@@ -16,28 +16,26 @@ class SubConfig:
                     setattr(self, k, v)
 
 
-class ModelConfig(SubConfig):
+class VAEConfig(SubConfig):
+    def __init__(self, config: Optional[Dict] = None):
+        self.d_latent = 4
+        self.dims = (96, 192, 384)
+        self.depths = (2, 2, 5)
+        self.kl_weight = 1e-4
+
+        super().__init__(config)
+        self.kl_weight = float(self.kl_weight)
+
+
+class FlowModelConfig(SubConfig):
     def __init__(self, config: Optional[Dict] = None):
         self.d_t: int = 384
         self.sigma_min: float = 1e-4
-
-        super().__init__(config)
-
-
-class UNetConfig(ModelConfig):
-    def __init__(self, config: Optional[Dict] = None):
         self.dims: Tuple[int] = (96, 192, 384, 768)
         self.depths: Tuple[int] = (2, 2, 5, 3)
 
-        super().__init__(config)
-
-
-class ViTConfig(ModelConfig):
-    def __init__(self, config: Optional[Dict] = None):
-        self.patch_size: int = 8
-        self.d_model: int = 768
-        self.n_layers: int = 12
-        self.n_heads: int = 12
+        self.vae_exp = "vae"
+        self.vae_epoch = 1
 
         super().__init__(config)
 
@@ -65,7 +63,7 @@ class Config(SubConfig):
 
         return data
 
-    def __init__(self, config_path: str, save: bool = False, metrics: Tuple[str] = ("loss",)):
+    def __init__(self, config_path: str, model_class: Type[SubConfig] = FlowModelConfig, save: bool = False, metrics: Tuple[str] = ("loss",)):
         yaml.add_multi_constructor('!', self.unknown_tag)
         yaml.add_multi_constructor('tag:', self.unknown_tag)
 
@@ -75,8 +73,6 @@ class Config(SubConfig):
         self.warmup: float = 0.2
         self.clip_grad: Optional[float] = None
 
-        self.arch = "unet"
-
         with open(config_path) as f:
             config = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -84,16 +80,10 @@ class Config(SubConfig):
         self.lr = float(self.lr)
 
         if config is not None:
-            if self.arch == "unet":
-                self.model: UNetConfig = UNetConfig(config["model"] if "model" in config else None)
-            else:
-                self.model: ViTConfig = ViTConfig(config["model"] if "model" in config else None)
+            self.model: model_class = model_class(config["model"] if "model" in config else None)
             self.dataset: DatasetConfig = DatasetConfig(config["dataset"] if "dataset" in config else None)
         else:
-            if self.arch == "unet":
-                self.model: UNetConfig = UNetConfig()
-            else:
-                self.model: ViTConfig = ViTConfig()
+            self.model: model_class = model_class()
             self.dataset: DatasetConfig = DatasetConfig()
 
         self.exp_name = os.path.splitext(os.path.basename(config_path))[0]
@@ -110,6 +100,7 @@ class Config(SubConfig):
                 f.write(",".join(
                     ["epoch"] + list(metrics) + ["timestamp"]
                 ) + "\n")
+        self.metrics = metrics
 
         self.epoch = 0
 
@@ -124,3 +115,5 @@ class Config(SubConfig):
                 f.write(",".join(
                     [str(self.epoch)] + [f"{m:.4f}" for m in metrics] + [str(datetime.now())]
                 ) + "\n")
+
+            self.epoch += 1
