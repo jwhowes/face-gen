@@ -27,7 +27,7 @@ class VAEConfig(SubConfig):
         self.kl_weight = float(self.kl_weight)
 
 
-class FlowMatchConfig(SubConfig):
+class FlowModelConfig(SubConfig):
     def __init__(self, config: Optional[Dict] = None):
         self.d_t: int = 384
         self.sigma_min: float = 1e-4
@@ -63,7 +63,7 @@ class Config(SubConfig):
 
         return data
 
-    def __init__(self, config_path: str, model_class: Type[SubConfig] = FlowMatchConfig, save: bool = False, metrics: Tuple[str] = ("loss",)):
+    def __init__(self, config_path: str, model_class: Type[SubConfig] = FlowModelConfig, save: bool = False, metrics: Tuple[str] = ("loss",)):
         yaml.add_multi_constructor('!', self.unknown_tag)
         yaml.add_multi_constructor('tag:', self.unknown_tag)
 

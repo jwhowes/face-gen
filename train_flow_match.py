@@ -18,7 +18,9 @@ if __name__ == "__main__":
         d_t=config.model.d_t,
         dims=config.model.dims,
         depths=config.model.depths,
-        sigma_min=config.model.sigma_min
+        sigma_min=config.model.sigma_min,
+        vae_exp=config.model.vae_exp,
+        vae_epoch=config.model.vae_epoch
     )
 
     train(model, config)
