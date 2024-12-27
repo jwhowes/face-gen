@@ -112,7 +112,7 @@ class UNet(nn.Module):
 
         self.head = nn.Conv2d(dims[0], vae_config.d_latent, kernel_size=5, padding=2)
 
-        self._t_model = nn.Sequential(
+        self.t_model = nn.Sequential(
             SinusoidalPosEmb(d_t),
             nn.Linear(d_t, 4 * d_t),
             nn.GELU(),
@@ -123,10 +123,6 @@ class UNet(nn.Module):
         self.d_latent = vae_config.d_latent
         self.sigma_min = sigma_min
         self.sigma_offset = 1 - sigma_min
-
-        self.log_t_mult = nn.Parameter(
-            torch.tensor(np.log(1.0))
-        )
 
         self.register_buffer(
             "mean",
@@ -162,9 +158,6 @@ class UNet(nn.Module):
                 z_t = block(z_t, t_emb)
 
         return self.head(z_t)
-
-    def t_model(self, t):
-        return self._t_model(t * self.log_t_mult.exp().clamp(max=1000.0))
 
     @torch.inference_mode()
     def sample(self, num_samples=1, image_size=192, num_steps=200, step="euler"):
