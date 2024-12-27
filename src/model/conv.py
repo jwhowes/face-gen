@@ -210,6 +210,7 @@ class UNet(nn.Module):
                 "scale_factor",
                 1.0 / z_1.flatten().std()
             )
+            self.scale_factor_set = True
 
         z_1 = z_1 * self.latent_scale
 
