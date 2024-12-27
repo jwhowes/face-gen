@@ -62,10 +62,14 @@ class FlowModel(nn.Module):
 
         self.latent_factor = 2 ** (len(vae_config.dims) - 1)
         self.register_buffer(
-            "scale_factor",
+            "z_std",
             torch.tensor(1.0)
         )
-        self.scale_factor_set = False
+        self.register_buffer(
+            "z_mean",
+            torch.tensor(0.0)
+        )
+        self.z_set = False
 
         self.vae = VAE(
             image_channels=image_channels,
@@ -194,22 +198,27 @@ class FlowModel(nn.Module):
             else:
                 raise NotImplementedError
 
-        x = self.vae.decoder(z_t / self.scale_factor)
+        x = self.vae.decoder(z_t * self.z_std + self.z_mean)
         return (x * self.std + self.mean).clamp(0.0, 1.0)
 
     def forward(self, x):
         B = x.shape[0]
 
         z_1 = self.vae.encoder(x).sample()
-        if not self.scale_factor_set:
-            del self.scale_factor
+        if not self.z_set:
+            del self.z_mean
+            del self.z_std
             self.register_buffer(
-                "scale_factor",
-                1.0 / z_1.flatten().std()
+                "z_mean",
+                z_1.flatten().mean()
             )
-            self.scale_factor_set = True
+            self.register_buffer(
+                "z_std",
+                z_1.flatten().std()
+            )
+            self.z_set = True
 
-        z_1 = z_1 * self.latent_scale
+        z_1 = (z_1 - self.z_mean) / self.z_std
 
         t = torch.rand(B, device=z_1.device).view(B, 1, 1, 1)
         z_0 = torch.randn_like(z_1)
