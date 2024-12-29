@@ -34,8 +34,7 @@ class FlowModelConfig(SubConfig):
         self.dims: Tuple[int] = (96, 192, 384, 768)
         self.depths: Tuple[int] = (2, 2, 5, 3)
 
-        self.vae_exp = "vae"
-        self.vae_epoch = 1
+        self.patch_size = 4
 
         super().__init__(config)
 

@@ -54,37 +54,11 @@ class FiLMBlock(nn.Module):
 
 class FlowModel(nn.Module):
     def __init__(
-            self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), vae_exp="vae", vae_epoch=1,
+            self, image_channels, d_t=384, dims=(96, 192, 384, 768), depths=(2, 2, 5, 3), patch_size=4,
             sigma_min=1e-4
     ):
         super(FlowModel, self).__init__()
-        vae_config = Config(f"experiments/{vae_exp}/config.yaml", model_class=VAEConfig).model
-
-        self.latent_factor = 2 ** (len(vae_config.dims) - 1)
-        self.register_buffer(
-            "z_std",
-            torch.tensor(1.0)
-        )
-        self.register_buffer(
-            "z_mean",
-            torch.tensor(0.0)
-        )
-        self.z_set = False
-
-        self.vae = VAE(
-            image_channels=image_channels,
-            d_latent=vae_config.d_latent,
-            dims=vae_config.dims,
-            depths=vae_config.depths
-        )
-        ckpt = torch.load(
-            f"experiments/{vae_exp}/checkpoint_{vae_epoch:02}.pt", weights_only=True, map_location="cpu"
-        )
-        self.vae.load_state_dict(ckpt)
-        self.vae.eval()
-        self.vae.requires_grad_(False)
-
-        self.stem = nn.Conv2d(vae_config.d_latent, dims[0], kernel_size=5, padding=2)
+        self.stem = nn.Conv2d(image_channels, dims[0], kernel_size=patch_size, stride=patch_size)
 
         self.down_path = nn.ModuleList()
         self.down_samples = nn.ModuleList()
@@ -114,7 +88,7 @@ class FlowModel(nn.Module):
                 FiLMBlock(dims[i], d_t) for _ in range(depths[i])
             ]))
 
-        self.head = nn.Conv2d(dims[0], vae_config.d_latent, kernel_size=5, padding=2)
+        self.head = nn.ConvTranspose2d(dims[0], image_channels, kernel_size=patch_size, stride=patch_size)
 
         self.t_model = nn.Sequential(
             SinusoidalPosEmb(d_t),
@@ -124,7 +98,6 @@ class FlowModel(nn.Module):
         )
 
         self.image_channels = image_channels
-        self.d_latent = vae_config.d_latent
         self.sigma_min = sigma_min
         self.sigma_offset = 1 - sigma_min
 
@@ -137,96 +110,75 @@ class FlowModel(nn.Module):
             torch.tensor(FaceDataset.std).view(1, -1, 1, 1)
         )
 
-    def train(self, mode=True):
-        super().train(mode)
-        self.vae.eval()
-
-    def pred_flow(self, z_t, t):
+    def pred_flow(self, x_t, t):
         t_emb = self.t_model(t)
 
-        z_t = self.stem(z_t)
+        x_t = self.stem(x_t)
 
         acts = []
         for blocks, sample in zip(self.down_path, self.down_samples):
             for block in blocks:
-                z_t = block(z_t, t_emb)
-            acts.append(z_t)
-            z_t = sample(z_t)
+                x_t = block(x_t, t_emb)
+            acts.append(x_t)
+            x_t = sample(x_t)
 
         for block in self.mid_blocks:
-            z_t = block(z_t, t_emb)
+            x_t = block(x_t, t_emb)
 
         for blocks, sample, combine, act in zip(self.up_path, self.up_samples, self.up_combines, acts[::-1]):
-            z_t = combine(torch.concatenate((
-                sample(z_t),
+            x_t = combine(torch.concatenate((
+                sample(x_t),
                 act
             ), dim=1))
 
             for block in blocks:
-                z_t = block(z_t, t_emb)
+                x_t = block(x_t, t_emb)
 
-        return self.head(z_t)
+        return self.head(x_t)
 
     @torch.inference_mode()
     def sample(self, num_samples=1, image_size=192, num_steps=200, step="euler"):
         dt = 1 / num_steps
 
-        z_t = torch.randn(
-            num_samples, self.d_latent, image_size // self.latent_factor, image_size // self.latent_factor
+        x_t = torch.randn(
+            num_samples, self.image_channels, image_size, image_size
         )
         ts = torch.linspace(0, 1, num_steps).unsqueeze(1).expand(-1, num_samples)
 
         for i in tqdm(range(num_steps)):
-            pred_flow = self.pred_flow(z_t, ts[i])
+            pred_flow = self.pred_flow(x_t, ts[i])
 
             if step == "euler":
-                z_t = z_t + dt * pred_flow
+                x_t = x_t + dt * pred_flow
             elif step == "midpoint":
-                z_t = z_t + dt * self.pred_flow(z_t + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt)
+                x_t = x_t + dt * self.pred_flow(x_t + 0.5 * dt * pred_flow, ts[i] + 0.5 * dt)
             elif step == "heun":
-                next_x = z_t + dt * pred_flow
+                next_x = x_t + dt * pred_flow
                 if i == num_steps - 1:
-                    z_t = next_x
+                    x_t = next_x
                 else:
-                    z_t = z_t + dt * 0.5 * (pred_flow + self.pred_flow(next_x, ts[i + 1]))
+                    x_t = x_t + dt * 0.5 * (pred_flow + self.pred_flow(next_x, ts[i + 1]))
             elif step == "stochastic":
-                z_t = z_t + (1 - ts[i]).view(-1, 1, 1, 1) * pred_flow
+                x_t = x_t + (1 - ts[i]).view(-1, 1, 1, 1) * pred_flow
                 if i < num_steps - 1:
                     next_t = ts[i + 1].view(-1, 1, 1, 1)
-                    z_0 = torch.randn_like(z_t)
-                    z_t = (1 - self.sigma_offset * next_t) * z_0 + next_t * z_t
+                    z_0 = torch.randn_like(x_t)
+                    x_t = (1 - self.sigma_offset * next_t) * z_0 + next_t * x_t
             else:
                 raise NotImplementedError
 
-        x = self.vae.decoder(z_t * self.z_std + self.z_mean)
-        return (x * self.std + self.mean).clamp(0.0, 1.0)
+        return (x_t * self.std + self.mean).clamp(0.0, 1.0)
 
-    def forward(self, x):
-        B = x.shape[0]
+    def forward(self, x_1):
+        B = x_1.shape[0]
 
-        z_1 = self.vae.encoder(x).sample()
-        if not self.z_set:
-            del self.z_mean
-            del self.z_std
-            self.register_buffer(
-                "z_mean",
-                z_1.flatten().mean()
-            )
-            self.register_buffer(
-                "z_std",
-                z_1.flatten().std()
-            )
-            self.z_set = True
+        t = torch.rand(B, device=x_1.device).view(B, 1, 1, 1)
+        x_0 = torch.randn_like(x_1)
+        x_t = (1 - self.sigma_offset * t) * x_0 + t * x_1
 
-        z_1 = (z_1 - self.z_mean) / self.z_std
+        pred = self.pred_flow(x_t, t)
 
-        t = torch.rand(B, device=z_1.device).view(B, 1, 1, 1)
-        z_0 = torch.randn_like(z_1)
-        z_t = (1 - self.sigma_offset * t) * z_0 + t * z_1
-
-        pred = self.pred_flow(z_t, t)
-
-        loss = F.mse_loss(pred, z_1 - self.sigma_offset * z_0)
+        loss = F.mse_loss(pred, x_1 - self.sigma_offset * x_0)
         return {
             "loss": loss,
             "metrics": (loss.item(),)

@@ -19,8 +19,7 @@ if __name__ == "__main__":
         dims=config.model.dims,
         depths=config.model.depths,
         sigma_min=config.model.sigma_min,
-        vae_exp=config.model.vae_exp,
-        vae_epoch=config.model.vae_epoch
+        patch_size=config.model.patch_size
     )
 
     train(model, config)
